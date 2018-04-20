@@ -16,23 +16,55 @@ loc = os.getcwd()
 #os.chdir("/home/mczerwinski/opt/git_kCSD/kCSD-python/corelib")
 #from KCSD import KCSD1D, KCSD2D
 
-
+def gauss2d(axis, p):
+    """
+     p:     list of parameters of the Gauss-function
+            [XCEN,YCEN,SIGMAX,SIGMAY,AMP,ANGLE]
+            SIGMA = FWHM / (2*sqrt(2*log(2)))
+            ANGLE = rotation of the X,Y direction of the Gaussian in radians
+    Returns
+    -------
+    the value of the Gaussian described by the parameters p
+    axis is the positions (x,y)
+    """
+    x,y = axis
+    x = x.reshape(x.size, 1)
+    y = y.reshape(1, x.size)
+    rcen_x = p[0] * np.cos(p[5]) - p[1] * np.sin(p[5])
+    rcen_y = p[0] * np.sin(p[5]) + p[1] * np.cos(p[5])
+    xp = x * np.cos(p[5]) - y * np.sin(p[5])
+    yp = x * np.sin(p[5]) + y * np.cos(p[5])
+    g = p[4]*np.exp(-(((rcen_x-xp)/p[2])**2+
+                      ((rcen_y-yp)/p[3])**2)/2.)
+    g = g/np.max(abs(g))
+    return g
 
 def gauss(axis, pos, std):
+    '''
+    axis is a numpy array or a tuple
+    '''
     _gauss = 1./(np.sqrt(2*np.pi)*std)*np.e**(-0.5*((axis-pos)/std)**2)
-    _gauss = _gauss/np.max(abs(_gauss))
+
+    #_gauss = _gauss/np.max(abs(_gauss))
     return _gauss
 
 def normalize(data):
     data/= np.max(abs(data))
-    data -= np.sum(data)/np.size(data)
+    #data -= np.sum(data)/np.size(data)
     return data
 
 def weight_width(x):
+    '''
+    transforms the amplitude of the gaussian
+    '''
     y = 1./(1.5+np.exp(-10*(x-0.5)))+0.1
     return y
 
-def SingleGauss(counter, dim=1, libsize='medium', resolution=100, ReturnMaxSize=False):
+def SingleGauss(counter, dim=1, placement=(0.5, 0.5, 0.5), libsize='medium', resolution=100, ReturnMaxSize=False):
+    '''
+    single gauss
+    placement is a tuple, with placement.size>=dim
+    '''
     axis = np.linspace(-0.5, 1.5, resolution*2)
     if libsize is 'large':
         sizes1 = np.arange(0.01, 0.2,0.01)
@@ -49,17 +81,22 @@ def SingleGauss(counter, dim=1, libsize='medium', resolution=100, ReturnMaxSize=
     if counter>np.size(sizes)-1:
         return False
     if dim==1:
-        source = gauss(axis, 0.5, sizes[counter])
+        source = gauss(axis, placement[0], sizes[counter])
+    elif dim==2:
+        # [XCEN,YCEN,SIGMAX,SIGMAY,AMP,ANGLE]
+        source =gauss2d((axis, axis), [placement[0], placement[1], sizes[counter], sizes[counter], 1, 0])
+
     source = normalize(source)
     if ReturnMaxSize:
         return source, np.size(sizes)
     else:
         return source
 
-def dipol1d(counter, same_sign=True, libsize='medium', resolution=100, ReturnMaxSize=False):
+def dipol(counter, dim=1,same_sign=True, libsize='medium', resolution=100, ReturnMaxSize=False):
     '''
     twice less sizes than the single gauss
-    there is 160 sources here
+    returns the csd from -0.5 to 1.5 in resolution*2
+    if ReturnMaxSize==True: will return the max iterations it will give, if counter-1>ReturnMaxSize it will return False
     '''
     if libsize is 'small':
         distances = np.hstack((np.arange(0.1,0.51,0.15), np.array([.666, 0.8333])))
@@ -72,8 +109,6 @@ def dipol1d(counter, same_sign=True, libsize='medium', resolution=100, ReturnMax
         distances = np.hstack((np.arange(0.01,0.51,0.05)[:-1], np.arange(0.5,1.01,0.1)))
         libsize_1gauss = 'medium'
 
-    # sizes from SingleGauss, but shorter
-
     if libsize_1gauss is 'small':
         sizes1 = np.arange(0.05, 0.12,0.05)
         sizes2 = np.arange(0.1, 0.61, 0.25)
@@ -84,18 +119,30 @@ def dipol1d(counter, same_sign=True, libsize='medium', resolution=100, ReturnMax
         sizes2 = np.arange(0.2, 0.61, 0.1)
         sizes = np.hstack((sizes1, sizes2))
 
-
     size_index = counter//np.size(distances)
     distance_index = counter%np.size(distances)
 
     axis = np.linspace(-0.5, 1.5, resolution*2)
 
-    pos1 = 0.5+distances[distance_index]
-    pos2 = 0.5
-    if same_sign:
-        source = gauss(axis, pos1, sizes[size_index])+gauss(axis, pos2, sizes[size_index])
+    if dim==1:
+        pos1 = 0.5+distances[distance_index]
+        pos2 = 0.5
+    elif dim==2:
+        pos1 = (0.5, 0.5+distances[distance_index])
+        pos2 = (0.5, 0.5)
+        par1 = [ pos1[0], pos1[1], sizes[size_index], sizes[size_index], 1, 0]
+        par2 = [ pos2[0], pos2[1], sizes[size_index], sizes[size_index], 1, 0]
+
+        # [XCEN,YCEN,SIGMAX,SIGMAY,AMP,ANGLE]
+    if same_sign==True:
+        a = 1
     else:
-        source = gauss(axis, pos1, sizes[size_index])-gauss(axis, pos2, sizes[size_index])
+        a = -1
+
+    if dim==1:
+        source = gauss(axis, pos1, sizes[size_index])+a*gauss(axis, pos2, sizes[size_index])
+    elif dim==2:
+        source = gauss2d((axis, axis), par1)+a*gauss2d((axis, axis), par2)
 
     source = normalize(source)
     if ReturnMaxSize:
@@ -103,6 +150,7 @@ def dipol1d(counter, same_sign=True, libsize='medium', resolution=100, ReturnMax
         return source, counter_max
     else:
         return source
+
 
 def tripole1d(counter, libsize='medium', resolution=100, ReturnMaxSize=False, sign_way=1):
     '''
@@ -169,25 +217,25 @@ def Source1D(Counter, libsize = 'medium'):
     Counter-=Nrepetitions
 
     #two sources:
-    source, Nrepetitions = dipol1d(0,libsize=libsize, ReturnMaxSize=True)
+    source, Nrepetitions = dipol(0,libsize=libsize, ReturnMaxSize=True)
     if Counter< Nrepetitions:
-        source= dipol1d(Counter,libsize=libsize)
+        source= dipol(Counter,libsize=libsize)
         return source
     Counter-=Nrepetitions
 
-    source, Nrepetitions = dipol1d(0,libsize=libsize, ReturnMaxSize=True)
+    source, Nrepetitions = dipol(0,libsize=libsize, ReturnMaxSize=True)
     if Counter< Nrepetitions:
-        source= dipol1d(Counter,libsize=libsize, same_sign=False)
+        source= dipol(Counter,libsize=libsize, same_sign=False)
         return source
     Counter-=Nrepetitions
 
-    source, Nrepetitions = dipol1d(0,libsize=libsize, ReturnMaxSize=True)
+    source, Nrepetitions = dipol(0,libsize=libsize, ReturnMaxSize=True)
     if Counter< Nrepetitions:
         source= tripole1d(Counter,libsize=libsize, sign_way=1)
         return source
     Counter-=Nrepetitions
 
-    source, Nrepetitions = dipol1d(0,libsize=libsize, ReturnMaxSize=True)
+    source, Nrepetitions = dipol(0,libsize=libsize, ReturnMaxSize=True)
     if Counter< Nrepetitions:
         source= tripole1d(Counter,libsize=libsize, sign_way=2)
         return source
@@ -236,26 +284,26 @@ def RandomCSD1d(seed, resolution=100):
 
     return csd
 
-
-def gauss2d(x,y,XCEN,YCEN,SIGMAX,SIGMAY,AMP,ANGLE):
-    """
-     p:     list of parameters of the Gauss-function
-            [XCEN,YCEN,SIGMAX,SIGMAY,AMP,ANGLE]
-            SIGMA = FWHM / (2*sqrt(2*log(2)))
-            ANGLE = rotation of the X,Y direction of the Gaussian in radians
-    Returns
-    -------
-    the value of the Gaussian described by the parameters p
-    at position (x,y)
-    """
-
-    rcen_x = XCEN * np.cos(ANGLE) - YCEN * np.sin(ANGLE)
-    rcen_y = XCEN * np.sin(ANGLE) + YCEN * np.cos(ANGLE)
-    xp = x * np.cos(ANGLE) - y * np.sin(ANGLE)
-    yp = x * np.sin(ANGLE) + y * np.cos(ANGLE)
-    g = AMP*np.exp(-(((rcen_x-xp)/SIGMAX)**2+
-                      ((rcen_y-yp)/SIGMAY)**2)/2.)
-    return g
+#
+#def gauss2d(x,y,XCEN,YCEN,SIGMAX,SIGMAY,AMP,ANGLE):
+#    """
+#     p:     list of parameters of the Gauss-function
+#            [XCEN,YCEN,SIGMAX,SIGMAY,AMP,ANGLE]
+#            SIGMA = FWHM / (2*sqrt(2*log(2)))
+#            ANGLE = rotation of the X,Y direction of the Gaussian in radians
+#    Returns
+#    -------
+#    the value of the Gaussian described by the parameters p
+#    at position (x,y)
+#    """
+#
+#    rcen_x = XCEN * np.cos(ANGLE) - YCEN * np.sin(ANGLE)
+#    rcen_y = XCEN * np.sin(ANGLE) + YCEN * np.cos(ANGLE)
+#    xp = x * np.cos(ANGLE) - y * np.sin(ANGLE)
+#    yp = x * np.sin(ANGLE) + y * np.cos(ANGLE)
+#    g = AMP*np.exp(-(((rcen_x-xp)/SIGMAX)**2+
+#                      ((rcen_y-yp)/SIGMAY)**2)/2.)
+#    return g
 
 def Window2d(NX, NY):
 
