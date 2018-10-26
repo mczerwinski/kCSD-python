@@ -152,7 +152,7 @@ def dipol(counter, dim=1,same_sign=True, libsize='medium', resolution=100, Retur
         return source
 
 
-def tripole1d(counter, libsize='medium', resolution=100, ReturnMaxSize=False, sign_way=1):
+def tripole(counter, libsize='medium', dim=1, resolution=100, ReturnMaxSize=False, sign_way=1):
     '''
     sign_way can be 1 or 2
     'large' and 'medium' are the same
@@ -184,13 +184,28 @@ def tripole1d(counter, libsize='medium', resolution=100, ReturnMaxSize=False, si
 
     axis = np.linspace(-0.5, 1.5, resolution*2)
 
-    pos1 = 0.5+distances[distance_index]
-    pos2 = 0.5
-    pos3 = 0.5-distances[distance_index]
-    if sign_way==1:
-        source = gauss(axis, pos1, sizes[size_index])+gauss(axis, pos2, sizes[size_index])-gauss(axis, pos3, sizes[size_index])
-    else:
-        source = gauss(axis, pos1, sizes[size_index])-gauss(axis, pos2, sizes[size_index])+gauss(axis, pos3, sizes[size_index])
+    if dim==1:
+        pos1 = 0.5+distances[distance_index]
+        pos2 = 0.5
+        pos3 = 0.5-distances[distance_index]
+    elif dim==2:
+        pos1 = 0.5+distances[distance_index]
+        pos2 = 0.5
+        pos3 = 0.5-distances[distance_index]
+        xpos = 0.5
+        par1 = [ xpos, pos1, sizes[size_index], sizes[size_index], 1, 0]
+        par2 = [ xpos, pos2, sizes[size_index], sizes[size_index], 1, 0]
+        par3 = [ xpos, pos3, sizes[size_index], sizes[size_index], 1, 0]
+
+    if sign_way ==1:
+        a,b,c = 1, 1, -1
+    elif sign_way==2:
+        a,b,c = 1, -1, 1
+
+    if dim==1:
+        source = a*gauss(axis, pos1, sizes[size_index])+ b*gauss(axis, pos2, sizes[size_index])+c*gauss(axis, pos3, sizes[size_index])
+    elif dim==2:
+        source = a*gauss2d((axis, axis), par1)+b*gauss2d((axis, axis), par2)+c*gauss2d((axis, axis), par3)
 
     source = normalize(source)
 
@@ -231,13 +246,13 @@ def Source1D(Counter, libsize = 'medium'):
 
     source, Nrepetitions = dipol(0,libsize=libsize, ReturnMaxSize=True)
     if Counter< Nrepetitions:
-        source= tripole1d(Counter,libsize=libsize, sign_way=1)
+        source= tripole(Counter,libsize=libsize, sign_way=1)
         return source
     Counter-=Nrepetitions
 
     source, Nrepetitions = dipol(0,libsize=libsize, ReturnMaxSize=True)
     if Counter< Nrepetitions:
-        source= tripole1d(Counter,libsize=libsize, sign_way=2)
+        source= tripole(Counter,libsize=libsize, sign_way=2)
         return source
     Counter-=Nrepetitions
 
@@ -284,6 +299,57 @@ def RandomCSD1d(seed, resolution=100):
 
     return csd
 
+def RandomCSD2d(seed, resolution=100):
+    '''
+    xaxis = np.linspace(-1,2, 3*N)
+
+    '''
+    #window = Window2d(2*N, 2*N)
+    #start_x, end_x, res_x = -0.5,1.5, 2*resolution
+    #start_y, end_y, res_y = -0.5,1.5, 2*resolution
+
+    #xaxis = np.linspace(start_x,end_x, res_x)
+    xaxis = np.linspace(-0.5, 1.5, resolution*2)
+    #yaxis = cp(xaxis)
+
+    #csd_x, csd_y = np.mgrid[start_x:end_x:np.complex(0,res_x),
+    #                        start_y:end_y:np.complex(0,res_y)]
+    np.random.seed(seed)
+    z = np.random.random(size=6*4+1)
+    if z[0]<0.25:
+        n_gauss = 1
+    elif z[0]<0.5:
+        n_gauss = 2
+    elif z[0]<0.75:
+        n_gauss = 3
+    else:
+        n_gauss = 4
+    csd = np.zeros((xaxis.size, xaxis.size))
+    counter = 1
+    for i in range(n_gauss):
+        XCEN = z[counter]
+        counter+=1
+        YCEN = z[counter]
+        counter+=1
+        SIGMAX = weight_width(z[counter])
+        counter+=1
+        SIGMAY = weight_width(z[counter])
+        counter+=1
+        ANGLE = z[counter]
+        counter+=1
+        AMP = z[counter]-0.5
+        counter+=1
+        #csd += gauss2d(csd_x, csd_y, XCEN,YCEN,SIGMAX,SIGMAY,AMP,ANGLE  )
+        p = [XCEN,YCEN,SIGMAX,SIGMAY,AMP,ANGLE ]
+        csd += gauss2d((xaxis, xaxis), p)
+
+    csd = normalize(csd)
+
+    #csd *= ss.tukey(xaxis.size)
+    #csd *= ss.gaussian(xaxis.size, xaxis.size/2.)
+    #csd *= window
+
+    return csd
 #
 #def gauss2d(x,y,XCEN,YCEN,SIGMAX,SIGMAY,AMP,ANGLE):
 #    """
@@ -368,55 +434,7 @@ def calculate_potential_3D(true_csd, ele_xx, ele_yy, ele_zz,
     #print toc, 'Total time taken - series, sims'
     return pots
 
-def TrueCSD2d(seed, N):
-    '''
-    xaxis = np.linspace(-1,2, 3*N)
 
-    '''
-    window = Window2d(2*N, 2*N)
-    start_x, end_x, res_x = -0.5,1.5, 2*N
-    start_y, end_y, res_y = -0.5,1.5, 2*N
-
-    xaxis = np.linspace(start_x,end_x, res_x)
-    #yaxis = cp(xaxis)
-
-    csd_x, csd_y = np.mgrid[start_x:end_x:np.complex(0,res_x),
-                            start_y:end_y:np.complex(0,res_y)]
-    np.random.seed(seed)
-    z = np.random.random(size=6*4+1)
-    if z[0]<0.25:
-        n_gauss = 1
-    elif z[0]<0.5:
-        n_gauss = 2
-    elif z[0]<0.75:
-        n_gauss = 3
-    else:
-        n_gauss = 4
-    csd = np.zeros((xaxis.size, xaxis.size))
-    counter = 1
-    for i in range(n_gauss):
-        XCEN = z[counter]
-        counter+=1
-        YCEN = z[counter]
-        counter+=1
-        SIGMAX = weight_width(z[counter])
-        counter+=1
-        SIGMAY = weight_width(z[counter])
-        counter+=1
-        ANGLE = z[counter]
-        counter+=1
-        AMP = z[counter]-0.5
-        counter+=1
-        csd += gauss2d(csd_x, csd_y, XCEN,YCEN,SIGMAX,SIGMAY,AMP,ANGLE  )
-
-
-    csd = normalize(csd)
-
-    #csd *= ss.tukey(xaxis.size)
-    #csd *= ss.gaussian(xaxis.size, xaxis.size/2.)
-    #csd *= window
-
-    return csd
 
 if __name__ == "__main__":
     save_dir = '/home/mczerwinski/results/csdPaper/'
